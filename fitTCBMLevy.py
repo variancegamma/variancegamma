@@ -19,6 +19,7 @@ Created on Wed Sep  9 00:46:19 2020
 """
 import numpy as np
 import scipy.stats as scs
+from statsmodels.distributions.empirical_distribution import ECDF
 import scipy as sc
 import statsmodels.api as sm
 import seaborn as sns
@@ -225,6 +226,7 @@ optcal=minimize(brloglikVG,xn0,args=(x),method='SLSQP',options=optsNM)
 #%%
 optcalNIG=minimize(brloglikNIG,xn0,args=(x),method='SLSQP',options=optsNM)
 optparProd=minimize(fun=nprodMLE,x0=np.array([mm1,mm2,ss1,ss2,rr]),args=(True,x,True,False),method='SLSQP')
+#%%
 #fmin_bfgs(loglikVGnum,x0,args=(x))
 #optVGp=sc.optimize.least_squares(loglikVGnum,x0,args=(x),xtol=1e-5, ftol=1e-5,verbose=1,max_nfev=10000)
 #sgm,nu,theta,mu=optcal.x
@@ -234,8 +236,14 @@ rr=1.0/(1.0+np.exp(-rr))
 sx=np.sort(x)
 #vgpdf=VGddnew(sx,sgm,nu,theta,mu)
 NIGpdf=NIGddnew(sx,sgmn,k,thetan,mun)
-Prodpdf=vnormprodpdfbynchi2(x,mm1,mm2,abs(ss1),abs(ss2),rr,True)
+Prodpdf=vnormprodpdfbynchi2(sx,mm1,mm2,abs(ss1),abs(ss2),rr,True)
 sns.histplot(x,stat='density');plt.plot(sx,Prodpdf);plt.plot(sx,NIGpdf);
 plt.title("Prod-NIG Fits Using Log Returns SPX (2023-2024)")
 legends=[ps.columns[2]+':Prod '+start+' - '+end,ps.columns[2]+':NIG '+start+' - '+end]
 plt.legend(legends)
+#%%
+%matplotlib qt
+ecdf=ECDF(sx)
+cdfmu=[simpson(Prodpdf[:t],sx[:t]) for t in np.linspace(1,sx.shape[0],sx.shape[0],dtype=int)]
+cdfNIG=[simpson(NIGpdf[:t],sx[:t]) for t in np.linspace(1,sx.shape[0],sx.shape[0],dtype=int)]
+plt.plot(sx,cdfmu,'--');plt.plot(sx,ecdf(sx));plt.plot(sx,cdfNIG,'--');plt.legend(['prod','emprical','NIG'])

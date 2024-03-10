@@ -17,6 +17,7 @@ Created on Wed Sep  9 00:46:19 2020
 
 @author: Administrator
 """
+from scipy.stats import ncx2
 import numpy as np
 import scipy.stats as scs
 from statsmodels.distributions.empirical_distribution import ECDF
@@ -145,7 +146,7 @@ def fastNpdf(x):
     C=1.0/np.sqrt(2.0*np.pi)
     return np.exp(-x*x*0.5)*C
 
-def Pnormprodpdfbynchi2(z,mm1,mm2,ss1,ss2,rr,ispdf):
+def Pnormprodpdfbynchi2(z,mm1,mm2,ss1,ss2,rr,ispdf,scalar):
     rr2=np.sqrt(ss1*ss2*(1-rr)/2)
     rr1=np.sqrt(rr*ss1*ss2+rr2**2)
     ll1=((mm1**2*ss2**2+mm2**2*ss1**2-2*rr*mm1*mm2*ss1*ss2)+4*mm1*mm2*rr1**2)/(4*rr1**2+4*rr2**2)
@@ -155,14 +156,83 @@ def Pnormprodpdfbynchi2(z,mm1,mm2,ss1,ss2,rr,ispdf):
     crmprdnchicorr=lambda x,z,ll1,ll2,sgm1,sgm2:nchix2(x/sgm2,ll2)*cnchix2((x+z)/sgm1,ll1)
     nrmprdnchicorr=lambda x,z,ll1,ll2,sgm1,sgm2:nchix2(x/sgm2,ll2)*nchix2((x+z)/sgm1,ll1)/(sgm1*sgm2)
     if ispdf:
-        
-        out=Parallel(n_jobs=8)(delayed(lambda zz:quad(nrmprdnchicorr, abs(np.minimum(zz,0.0)),np.inf,epsabs=1e-5,args=(zz,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0])(zz)  for zz in z)
+        if scalar:
+            out=quad(nrmprdnchicorr, abs(np.minimum(z,0.0)),np.inf,epsabs=1e-5,args=(z,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0]
+        else:
+            out=Parallel(n_jobs=8)(delayed(lambda zz:quad(nrmprdnchicorr, abs(np.minimum(zz,0.0)),np.inf,epsabs=1e-5,args=(zz,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0])(zz)  for zz in z)
         #quad(nrmprdnchicorr, abs(np.minimum(z,0.0)),np.inf,epsabs=1e-5,args=(z,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0]
         
     else:
-        crmprdnchicorr=lambda x,z,ll1,ll2,sgm1,sgm2:nchix2(x/sgm2,ll2)*cnchix2((x+z)/sgm1,ll1)
-        out=quad(crmprdnchicorr, abs(np.minimum(z,0.0)),np.inf,epsabs=1e-5,args=(z,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0]
+        crmprdnchicorr=lambda x,z,ll1,ll2,sgm1,sgm2:nchix2(x/sgm2,ll2)*cnchix2((x+z)/sgm1,ll1)/np.sqrt(sgm1*sgm2)
+        
+        if scalar:
+            out=quad(crmprdnchicorr, abs(np.minimum(z,0.0)),np.inf,epsabs=1e-5,args=(z,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0]
+        else:
+            out=Parallel(n_jobs=8)(delayed(lambda zz:quad(crmprdnchicorr, abs(np.minimum(zz,0.0)),np.inf,epsabs=1e-5,args=(zz,(ll1/rr1**2),(ll2/rr2**2),rr1**2,rr2**2))[0])(zz)  for zz in z)
     return out
+def nchidirect(z,mm1,mm2,ss1,ss2,rr,ispdf):
+    rr2=np.sqrt(ss1*ss2*(1-rr)/2)
+    rr1=np.sqrt(rr*ss1*ss2+rr2**2)
+    ll1=((mm1**2*ss2**2+mm2**2*ss1**2-2*rr*mm1*mm2*ss1*ss2)+4*mm1*mm2*rr1**2)/(4*rr1**2+4*rr2**2)
+    ll2=ll1-mm1*mm2
+    cfcorr=lambda x,z,ll1,ll2,sgm1,sgm2:ncx2.pdf(x,1,((ll2/rr2**2)),loc=0.0,scale=sgm2)*ncx2.cdf((x+z),1,((ll1/rr1**2)),loc=0.0,scale=sgm1)
+    fcorr=lambda x,z,ll1,ll2,sgm1,sgm2:ncx2.pdf(x,1,((ll2/rr2**2)),loc=0.0,scale=sgm2)*ncx2.pdf(x+z,1,((ll1/rr1**2)),loc=0.0,scale=sgm1)
+    
+    if ispdf:
+        out=quad(fcorr,0,np.inf,args=(z,ll1,ll2,rr1**2,rr2**2))[0]
+    else:
+        out=quad(cfcorr,0,np.inf,args=(z,ll1,ll2,rr1**2,rr2**2))[0]
+    return out
+
+def NRProdInv(x0,pars,xq):
+    mm1,mm2,ss1,ss2,rr=pars
+    C=0.9997073224587019
+    #x0=1e-3  
+    eps=1.
+    it=0
+    firsteval=Pnormprodpdfbynchi2(x0,mm1,mm2,abs(ss1),abs(ss2),rr,False,True)/C
+    #if (firsteval>xq):
+     #   return print('Fun at x=0.0 is greater than q')
+    #else:        
+    while eps>1e-7:
+        it+=1
+        fundiff=Pnormprodpdfbynchi2(x0,mm1,mm2,abs(ss1),abs(ss2),rr,False,True)/C-xq
+        x1=x0-(fundiff)/Pnormprodpdfbynchi2(x0,mm1,mm2,abs(ss1),abs(ss2),rr,True,True)
+        eps=abs(fundiff)
+        x0=x1
+        print(x1)
+        print(it)
+        if x0<0.:
+            x0=xq/10.
+        if it>10:
+            break;
+        print("final Convergence: %.8f" %(eps))
+    return x1
+
+def NRProdInvnChi2(x0,pars,xq):
+    mm1,mm2,ss1,ss2,rr=pars
+    C=1.0
+    #x0=1e-3  
+    eps=1.
+    it=0
+    firsteval=Pnormprodpdfbynchi2(x0,mm1,mm2,abs(ss1),abs(ss2),rr,False,True)/C
+    #if (firsteval>xq):
+     #   return print('Fun at x=0.0 is greater than q')
+    #else:        
+    while eps>1e-7:
+        it+=1
+        fundiff=nchidirect(x0,mm1,mm2,abs(ss1),abs(ss2),rr,False)/C-xq
+        x1=x0-(fundiff)/nchidirect(x0,mm1,mm2,abs(ss1),abs(ss2),rr,True)
+        eps=abs(fundiff)
+        x0=x1
+        print(x1)
+        print(it)
+        if x0<0.:
+            x0=xq/10.
+        if it>10:
+            break;
+        print("final Convergence: %.8f" %(eps))
+    return x1
 
 def normprodpdfbynchi2(z,mm1,mm2,ss1,ss2,rr,ispdf):
     rr2=np.sqrt(ss1*ss2*(1-rr)/2)
@@ -196,7 +266,7 @@ def nprodMLE(pars,ispdf,z,withmu,nocorr):
         return -np.sum(np.log(NPCorr(z,0.0,0.0,abs(ss1),abs(ss2),rr)))
     
 
-#%%
+
 start='2023-03-05'
 end='2024-03-05'
 stocklist=['^GSPC']
@@ -212,8 +282,10 @@ mm1=1.0;ss1=2.0;mm2=0.5;ss2=2.0;rr=0.5
 vnormprodpdfbynchi2=np.vectorize(normprodpdfbynchi2)
 #normprodpdfbynchi2(0.05,mm1,mm2,ss1,ss2,rr)
 
-#ps=pd.read_excel("C:/Users/aheki/Downloads/GIP_Agirlikli_Ortalama_Fiyat.xlsx")
-#x=np.diff(np.log(ps.Close.dropna().values))
+ps=pd.read_excel("C:/Users/aheki/Downloads/GIP_Agirlikli_Ortalama_Fiyat.xlsx")
+psI=ps.set_index(ps.Tarih)
+psId=psI.loc['2018-01-01 00:00:00':'2018-06-30 23:00:00']
+x=np.diff(np.log(psId.AOF.dropna().values))
 x0=VGmom(x)
 #x0=VGmomFull(x)
 xn0=NIGmom(x)
@@ -222,7 +294,7 @@ print("Check Error:%0.7f" %(brloglikVG(x0,x)))
 print("Check Error:%0.7f" %(brloglikNIG(x0,x)))
 optsCG = {'maxiter' : None, 'disp' : True,'gtol' : 1e-5,'norm' : np.inf, 'eps' : 1.4901161193847656e-07}
 optsNM={'xtol': 1e-5,'ftol':1e-5,'disp':True,'maxfev':10000}
-optcal=minimize(brloglikVG,xn0,args=(x),method='SLSQP',options=optsNM)
+optcal=minimize(brloglikVG,x0,args=(nsx),method='SLSQP',options=optsNM)
 #%%
 optcalNIG=minimize(brloglikNIG,xn0,args=(x),method='SLSQP',options=optsNM)
 optparProd=minimize(fun=nprodMLE,x0=np.array([mm1,mm2,ss1,ss2,rr]),args=(True,x,True,False),method='SLSQP')
@@ -236,7 +308,7 @@ rr=1.0/(1.0+np.exp(-rr))
 sx=np.sort(x)
 #vgpdf=VGddnew(sx,sgm,nu,theta,mu)
 NIGpdf=NIGddnew(sx,sgmn,k,thetan,mun)
-Prodpdf=vnormprodpdfbynchi2(sx,mm1,mm2,abs(ss1),abs(ss2),rr,True)
+Prodpdf=Pnormprodpdfbynchi2(sx.tolist(),mm1,mm2,abs(ss1),abs(ss2),rr,True)
 sns.histplot(x,stat='density');plt.plot(sx,Prodpdf);plt.plot(sx,NIGpdf);
 plt.title("Prod-NIG Fits Using Log Returns SPX (2023-2024)")
 legends=[ps.columns[2]+':Prod '+start+' - '+end,ps.columns[2]+':NIG '+start+' - '+end]
